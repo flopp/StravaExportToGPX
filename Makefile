@@ -1,4 +1,4 @@
-.PHONY: setup format run
+.PHONY: setup format
 
 setup:
 	python3 -m venv venv
@@ -6,7 +6,4 @@ setup:
 	venv/bin/pip install -r requirements-dev.txt
 
 format:
-	venv/bin/black main.py
-
-run:
-	venv/bin/python main.py --strava-export data/export_11565561 --output out --filter-type Run --filter-type Hike
+	venv/bin/black strava2gpx.py
