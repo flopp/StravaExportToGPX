@@ -35,6 +35,20 @@ def convert_activity(activity_file_name: str, target_gpx_file_name: str):
                 target_gpx_file_name,
             ]
         )
+    elif activity_file_name.endswith(".tcx") or activity_file_name.endswith(".tcx.gz"):
+        subprocess.run(
+            [
+                "gpsbabel",
+                "-i",
+                "gtrnctr",
+                "-f",
+                activity_file_name,
+                "-o",
+                "gpx",
+                "-F",
+                target_gpx_file_name,
+            ]
+        )
     elif activity_file_name.endswith(".gpx"):
         shutil.copyfile(activity_file_name, target_gpx_file_name)
     elif activity_file_name.endswith(".gpx.gz"):
