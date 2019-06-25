@@ -42,7 +42,7 @@ def convert_activity(activity_file_name: str, target_gpx_file_name: str):
             with open(target_gpx_file_name, "wb") as gpx_file:
                 shutil.copyfileobj(gzip_file, gpx_file)
     else:
-        sys.stderr.print(f"Unrecognized/unsupported file format: {activity_file_name}")
+        print(f"Unrecognized/unsupported file format: {activity_file_name}")
 
 
 def print_usage_error(args_parser: argparse.ArgumentParser, message: str):
