@@ -171,10 +171,11 @@ def main():
                             f'Skipping {activity_file_name}, type={activity["type"]}.'
                         )
                     continue
-                gpx_file_name = str(output_path / (activity["id"] + ".gpx"))
+                gpx_file_name = f"{activity['date']}_{activity['type']}_{activity['id']}.gpx"
+                gpx_file_path = str(output_path / gpx_file_name)
                 if args.verbose:
-                    print(f"Converting {activity_file_name} to {gpx_file_name}.")
-                convert_activity(activity_file_name, gpx_file_name)
+                    print(f"Converting {activity_file_name} to {gpx_file_path}.")
+                convert_activity(activity_file_name, gpx_file_path)
 
 
 if __name__ == "__main__":
