@@ -20,6 +20,15 @@ def matches_filter_types(activity: Dict, filter_types: Optional[List]) -> bool:
     return False
 
 
+def matches_filter_years(activity: Dict, filter_years: Optional[List]) -> bool:
+    if not filter_years:
+        return True
+    activity_year = activity["date"][0:4]
+    if activity_year in filter_years:
+        return True
+    return False
+
+
 def convert_activity(activity_file_name: str, target_gpx_file_name: str):
     if activity_file_name.endswith(".fit") or activity_file_name.endswith(".fit.gz"):
         subprocess.run(
@@ -104,6 +113,16 @@ def main():
         help="List all activity types found in the Strava export directory.",
     )
     args_parser.add_argument(
+        "--filter-year",
+        "-y",
+        dest="filter_years",
+        metavar="YEAR",
+        type=str,
+        action="append",
+        help="Only convert activities with the given YEAR. May be used multiple times.",
+    )
+
+    args_parser.add_argument(
         "--verbose", "-v", dest="verbose", action="store_true", help="Verbose output."
     )
 
@@ -138,6 +157,14 @@ def main():
             csv_reader = csv.DictReader(csv_file)
             for activity in csv_reader:
                 activity_file_name = str(strava_export_path / activity["filename"])
+
+                if not matches_filter_years(activity, args.filter_years):
+                    if args.verbose:
+                        print(
+                            f'Skipping {activity_file_name}, year={activity["date"][0:4]}.'
+                        )
+                    continue
+
                 if not matches_filter_types(activity, args.filter_types):
                     if args.verbose:
                         print(
