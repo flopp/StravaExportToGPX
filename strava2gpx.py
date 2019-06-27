@@ -2,11 +2,13 @@
 
 import argparse
 import csv
+import fileinput
 import gzip
 import pathlib
 import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Dict, List, Optional
 
 
@@ -29,43 +31,78 @@ def matches_filter_years(activity: Dict, filter_years: Optional[List]) -> bool:
     return False
 
 
+GPSBABEL_FILE_TYPE = {
+    "fit": "garmin_fit",
+    "tcx": "gtrnctr",
+}
+
+
+def gpsbabel_convert(input_file_path, output_file_path, file_type):
+    subprocess.run(
+        [
+            "gpsbabel",
+            "-i",
+            GPSBABEL_FILE_TYPE[file_type],
+            "-f",
+            input_file_path,
+            "-o",
+            "gpx",
+            "-F",
+            output_file_path,
+        ]
+    )
+
+
+def strip_whitespaces_from_file(input_file_path):
+    with fileinput.FileInput(files=(input_file_path,), inplace=True) as file:
+        for line in file:
+            print(line.strip())
+
+
 def convert_activity(activity_file_name: str, target_gpx_file_name: str):
+    # gpsbabel support both fit and fit.gz
     if activity_file_name.endswith(".fit") or activity_file_name.endswith(".fit.gz"):
-        subprocess.run(
-            [
-                "gpsbabel",
-                "-i",
-                "garmin_fit",
-                "-f",
-                activity_file_name,
-                "-o",
-                "gpx",
-                "-F",
-                target_gpx_file_name,
-            ]
+        gpsbabel_convert(
+            activity_file_name,
+            target_gpx_file_name,
+            'fit',
         )
-    elif activity_file_name.endswith(".tcx") or activity_file_name.endswith(".tcx.gz"):
-        subprocess.run(
-            [
-                "gpsbabel",
-                "-i",
-                "gtrnctr",
-                "-f",
-                activity_file_name,
-                "-o",
-                "gpx",
-                "-F",
+
+    elif activity_file_name.endswith(".tcx"):
+        with tempfile.NamedTemporaryFile() as fp:
+            shutil.copyfile(activity_file_name, fp)
+            # As gpsbabel does not support tcx files with trailing spaces, remove them
+            strip_whitespaces_from_file(fp.name)
+            gpsbabel_convert(
+                fp.name,
                 target_gpx_file_name,
-            ]
-        )
+                'tcx',
+            )
+
+    # As gpsbabel does not support tcx compressed file, gunzip first
+    elif activity_file_name.endswith(".tcx.gz"):
+        with gzip.open(activity_file_name, "rb") as gzip_file:
+            with tempfile.NamedTemporaryFile() as fp:
+                shutil.copyfileobj(gzip_file, fp)
+                # As gpsbabel does not support tcx files with trailing spaces, remove them
+                strip_whitespaces_from_file(fp.name)
+                gpsbabel_convert(
+                    fp.name,
+                    target_gpx_file_name,
+                    'tcx'
+                )
+
+    # For GPX files, nothing to do, just copy the file
     elif activity_file_name.endswith(".gpx"):
         shutil.copyfile(activity_file_name, target_gpx_file_name)
+
+    # For compressed GPX files, just uncompress and copy the file
     elif activity_file_name.endswith(".gpx.gz"):
         with gzip.open(activity_file_name, "rb") as gzip_file:
             with open(target_gpx_file_name, "wb") as gpx_file:
                 shutil.copyfileobj(gzip_file, gpx_file)
     else:
-        sys.stderr.write(
+        print(
             f"Unrecognized/unsupported file format: {activity_file_name}\n"
         )
 
@@ -171,10 +208,11 @@ def main():
                             f'Skipping {activity_file_name}, type={activity["type"]}.'
                         )
                     continue
-                gpx_file_name = str(output_path / (activity["id"] + ".gpx"))
+                gpx_file_name = f"{activity['date']}_{activity['type']}_{activity['id']}.gpx"
+                gpx_file_path = str(output_path / gpx_file_name)
                 if args.verbose:
-                    print(f"Converting {activity_file_name} to {gpx_file_name}.")
-                convert_activity(activity_file_name, gpx_file_name)
+                    print(f"Converting {activity_file_name} to {gpx_file_path}.")
+                convert_activity(activity_file_name, gpx_file_path)
 
 
 if __name__ == "__main__":
