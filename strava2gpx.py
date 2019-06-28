@@ -4,12 +4,13 @@ import argparse
 import csv
 import fileinput
 import gzip
-import pathlib
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, Optional
+import zipfile
+from typing import Dict, IO, List, Optional
 
 
 def matches_filter_types(activity: Dict, filter_types: Optional[List]) -> bool:
@@ -31,13 +32,10 @@ def matches_filter_years(activity: Dict, filter_years: Optional[List]) -> bool:
     return False
 
 
-GPSBABEL_FILE_TYPE = {
-    "fit": "garmin_fit",
-    "tcx": "gtrnctr",
-}
+GPSBABEL_FILE_TYPE = {"fit": "garmin_fit", "tcx": "gtrnctr"}
 
 
-def gpsbabel_convert(input_file_path, output_file_path, file_type):
+def gpsbabel_convert(input_file_path: str, output_file_path: str, file_type: str):
     subprocess.run(
         [
             "gpsbabel",
@@ -53,64 +51,69 @@ def gpsbabel_convert(input_file_path, output_file_path, file_type):
     )
 
 
-def strip_whitespaces_from_file(input_file_path):
-    with fileinput.FileInput(files=(input_file_path,), inplace=True) as file:
-        for line in file:
+def strip_whitespaces_from_file(input_file_path: str):
+    with fileinput.FileInput(files=(input_file_path,), inplace=True) as fp:
+        for line in fp:
             print(line.strip())
 
 
+def gunzip(gzip_file_name: str, target_file_obj: IO):
+    with gzip.open(gzip_file_name, "rb") as gzip_file:
+        shutil.copyfileobj(gzip_file, target_file_obj)
+        target_file_obj.flush()
+
+
+def zip_extract(zip_file: zipfile.ZipFile, file_name: str, target_file_obj: IO):
+    with zip_file.open(file_name) as fp:
+        shutil.copyfileobj(fp, target_file_obj)
+        target_file_obj.flush()
+
+
 def convert_activity(activity_file_name: str, target_gpx_file_name: str):
-    # gpsbabel support both fit and fit.gz
-    if activity_file_name.endswith(".fit") or activity_file_name.endswith(".fit.gz"):
-        gpsbabel_convert(
-            activity_file_name,
-            target_gpx_file_name,
-            'fit',
-        )
+    if (
+        activity_file_name.endswith(".fit.gz")
+        or activity_file_name.endswith(".tcx.gz")
+        or activity_file_name.endswith(".gpx.gz")
+    ):
+        suffix = activity_file_name[-7:-3]
+        with tempfile.NamedTemporaryFile(suffix=suffix) as gunzipped_file:
+            gunzip(activity_file_name, gunzipped_file)
+            gunzipped_file.flush()
+            convert_activity(gunzipped_file.name, target_gpx_file_name)
+
+    elif activity_file_name.endswith(".fit"):
+        gpsbabel_convert(activity_file_name, target_gpx_file_name, "fit")
 
     elif activity_file_name.endswith(".tcx"):
-        with tempfile.NamedTemporaryFile() as fp:
-            shutil.copyfile(activity_file_name, fp)
+        with tempfile.NamedTemporaryFile() as tcx_file:
             # As gpsbabel does not support tcx files with trailing spaces, remove them
-            strip_whitespaces_from_file(fp.name)
-            gpsbabel_convert(
-                fp.name,
-                target_gpx_file_name,
-                'tcx',
-            )
+            shutil.copyfile(activity_file_name, str(tcx_file))
+            tcx_file.flush()
+            strip_whitespaces_from_file(tcx_file.name)
+            gpsbabel_convert(tcx_file.name, target_gpx_file_name, "tcx")
 
-    # As gpsbabel does not support tcx compressed file, gunzip first
-    elif activity_file_name.endswith(".tcx.gz"):
-        with gzip.open(activity_file_name, "rb") as gzip_file:
-            with tempfile.NamedTemporaryFile() as fp:
-                shutil.copyfileobj(gzip_file, fp)
-                # As gpsbabel does not support tcx files with trailing spaces, remove them
-                strip_whitespaces_from_file(fp.name)
-                gpsbabel_convert(
-                    fp.name,
-                    target_gpx_file_name,
-                    'tcx'
-                )
-
-    # For GPX files, nothing to do, just copy the file
     elif activity_file_name.endswith(".gpx"):
         shutil.copyfile(activity_file_name, target_gpx_file_name)
 
-    # For compressed GPX files, just uncompress and copy the file
-    elif activity_file_name.endswith(".gpx.gz"):
-        with gzip.open(activity_file_name, "rb") as gzip_file:
-            with open(target_gpx_file_name, "wb") as gpx_file:
-                shutil.copyfileobj(gzip_file, gpx_file)
     else:
-        print(
-            f"Unrecognized/unsupported file format: {activity_file_name}\n"
-        )
+        print(f"Unrecognized/unsupported file format: {activity_file_name}\n")
 
 
 def print_usage_error(args_parser: argparse.ArgumentParser, message: str):
     args_parser.print_usage()
     sys.stderr.write(message)
     sys.exit(2)
+
+
+def get_activities(
+    zip_file: Optional[zipfile.ZipFile], csv_file_name: str
+) -> List[Dict]:
+    if zip_file:
+        with tempfile.NamedTemporaryFile(suffix=".csv") as unzipped_file:
+            zip_extract(zip_file, csv_file_name, unzipped_file)
+            return get_activities(None, unzipped_file.name)
+    with open(csv_file_name) as csv_file:
+        return list(csv.DictReader(csv_file))
 
 
 def main():
@@ -120,10 +123,10 @@ def main():
         "--input",
         "-i",
         dest="strava_export",
-        metavar="DIR",
+        metavar="ZIPFILE_OR_DIR",
         type=str,
         required=True,
-        help="Directory containing the unzipped Strava export to work on.",
+        help="A Strava export zip file, or a directory containing the unzipped Strava export to work on.",
     )
     args_parser.add_argument(
         "--output",
@@ -165,22 +168,30 @@ def main():
 
     args = args_parser.parse_args()
 
-    strava_export_path = pathlib.Path(args.strava_export)
-    activities_csv_path = strava_export_path / "activities.csv"
+    if os.path.isdir(args.strava_export):
+        zip_file = None
+        activities_csv = file.join(args.strava_export, "activities.csv")
+    else:
+        zip_file = zipfile.ZipFile(args.strava_export, "r")
+        activities_csv = "activities.csv"
 
     if args.list_types:
         if args.output_dir or args.filter_types:
             print_usage_error(
                 args_parser,
-                "error: you cannot use --output or --filter-type together with --list.types\n",
+                "error: you cannot use --output or --filter-type together with --list-types\n",
             )
-        activity_types = set()
-        with activities_csv_path.open() as csv_file:
-            csv_reader = csv.DictReader(csv_file)
-            for activity in csv_reader:
-                activity_types.add(activity["type"])
         print(f"Activity types found in {args.strava_export}:")
-        for activity_type in sorted(list(activity_types)):
+        for activity_type in sorted(
+            list(
+                set(
+                    [
+                        activity["type"]
+                        for activity in get_activities(zip_file, activities_csv)
+                    ]
+                )
+            )
+        ):
             print(f"- {activity_type}")
     else:
         if not args.output_dir:
@@ -188,30 +199,43 @@ def main():
                 args_parser,
                 "error: either --output or --list-types must be specified\n",
             )
-        output_path = pathlib.Path(args.output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-        with activities_csv_path.open() as csv_file:
-            csv_reader = csv.DictReader(csv_file)
-            for activity in csv_reader:
-                activity_file_name = str(strava_export_path / activity["filename"])
+        os.makedirs(args.output_dir, exist_ok=True)
 
-                if not matches_filter_years(activity, args.filter_years):
-                    if args.verbose:
-                        print(
-                            f'Skipping {activity_file_name}, year={activity["date"][0:4]}.'
-                        )
-                    continue
+        for activity in get_activities(zip_file, activities_csv):
+            activity_file_name = activity["filename"]
 
-                if not matches_filter_types(activity, args.filter_types):
-                    if args.verbose:
-                        print(
-                            f'Skipping {activity_file_name}, type={activity["type"]}.'
-                        )
-                    continue
-                gpx_file_name = f"{activity['date']}_{activity['type']}_{activity['id']}.gpx"
-                gpx_file_path = str(output_path / gpx_file_name)
+            if not activity_file_name:
+                continue
+
+            if not zip_file:
+                activity_file_name = str(strava_export_path / activity_file_name)
+
+            if not matches_filter_years(activity, args.filter_years):
                 if args.verbose:
-                    print(f"Converting {activity_file_name} to {gpx_file_path}.")
+                    print(
+                        f'Skipping {activity_file_name}, year={activity["date"][0:4]}.'
+                    )
+                continue
+
+            if not matches_filter_types(activity, args.filter_types):
+                if args.verbose:
+                    print(f'Skipping {activity_file_name}, type={activity["type"]}.')
+                continue
+
+            gpx_file_name = (
+                f"{activity['date']}_{activity['type']}_{activity['id']}.gpx"
+            )
+            gpx_file_path = os.path.join(args.output_dir, gpx_file_name)
+
+            if args.verbose:
+                print(f"Converting {activity_file_name} to {gpx_file_path}.")
+            if zip_file:
+                with tempfile.NamedTemporaryFile(
+                    suffix=os.path.basename(activity_file_name)
+                ) as unzipped_file:
+                    zip_extract(zip_file, activity_file_name, unzipped_file)
+                    convert_activity(unzipped_file.name, gpx_file_path)
+            else:
                 convert_activity(activity_file_name, gpx_file_path)
 
 

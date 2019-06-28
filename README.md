@@ -15,10 +15,10 @@ This needs
 
 ### Convert Activities to GPX
 
-Convert all 2018 "Run" and "Hike" activities from a Strava export to GPX (`export_123456789` is a directory containing an unzipped Strava export):
+Convert all 2018 "Run" and "Hike" activities from a Strava export to GPX (`export_123456789.zip` is a Strava export file):
 
 ```
-./strava2gpx.py --input export_123456789 --output gpxfiles --filter-type Run --filter-type Hike --filter-year 2018
+./strava2gpx.py --input export_123456789.zip --output gpxfiles --filter-type Run --filter-type Hike --filter-year 2018
 ```
 
 ### List Activity Types
@@ -26,11 +26,11 @@ Convert all 2018 "Run" and "Hike" activities from a Strava export to GPX (`expor
 List activity types (to be used with the `--filter-type` option when actually converting):
 
 ```
-./strava2gpx.py --input export_123456789 --list-types
+./strava2gpx.py --input export_123456789.zip --list-types
 
 ->
 
-Activity types found in export_123456789:
+Activity types found in export_123456789.zip:
 - Hike
 - Ride
 - Run

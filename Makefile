@@ -1,4 +1,4 @@
-.PHONY: setup format
+.PHONY: setup format mypy
 
 setup:
 	python3 -m venv venv
@@ -7,3 +7,7 @@ setup:
 
 format:
 	venv/bin/black strava2gpx.py
+
+mypy:
+	venv/bin/mypy strava2gpx.py
+
