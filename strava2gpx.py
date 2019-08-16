@@ -113,7 +113,13 @@ def get_activities(
             zip_extract(zip_file, csv_file_name, unzipped_file)
             return get_activities(None, unzipped_file.name)
     with open(csv_file_name) as csv_file:
-        return list(csv.DictReader(csv_file))
+        activities = list(csv.DictReader(csv_file))
+        if len(activities) > 0:
+            keys = set(activities[0].keys())
+            missing_keys = [key for key in ['id', 'date', 'type', 'filename'] if key not in keys]
+            if len(missing_keys) > 0:
+                raise Exception(f"The activities CSV file is missing some required fields:\n    {missing_keys};\nexisting fields:\n    {list(activities[0].keys())}")
+        return activities
 
 
 def main():
