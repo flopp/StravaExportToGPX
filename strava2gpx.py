@@ -114,12 +114,28 @@ def get_activities(
             return get_activities(None, unzipped_file.name)
     with open(csv_file_name) as csv_file:
         activities = list(csv.DictReader(csv_file))
-        if len(activities) > 0:
-            keys = set(activities[0].keys())
-            missing_keys = [key for key in ['id', 'date', 'type', 'filename'] if key not in keys]
-            if len(missing_keys) > 0:
-                raise Exception(f"The activities CSV file is missing some required fields:\n    {missing_keys};\nexisting fields:\n    {list(activities[0].keys())}")
-        return activities
+        if len(activities) == 0:
+            return []
+
+        keys = list(activities[0].keys())
+        if len(keys) != 10 and len(keys) != 11:
+            raise Exception(
+                f"Unexpected header items in activities CSV file (expeciting 10 or 11 items): {list(keys)}"
+            )
+
+        id_field = keys[0]
+        date_field = keys[1]
+        type_field = keys[3]
+        filename_field = keys[-1]
+        return [
+            {
+                "id": a[id_field],
+                "type": a[type_field],
+                "date": a[date_field],
+                "filename": a[filename_field],
+            }
+            for a in activities
+        ]
 
 
 def main():
@@ -176,7 +192,7 @@ def main():
 
     if os.path.isdir(args.strava_export):
         zip_file = None
-        activities_csv = file.join(args.strava_export, "activities.csv")
+        activities_csv = os.path.join(args.strava_export, "activities.csv")
     else:
         zip_file = zipfile.ZipFile(args.strava_export, "r")
         activities_csv = "activities.csv"
@@ -214,7 +230,9 @@ def main():
                 continue
 
             if not zip_file:
-                activity_file_name = str(strava_export_path / activity_file_name)
+                activity_file_name = os.path.join(
+                    args.strava_export, activity_file_name
+                )
 
             if not matches_filter_years(activity, args.filter_years):
                 if args.verbose:
